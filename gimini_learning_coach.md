@@ -308,3 +308,123 @@ In this revised code, `main()` doesn't *sequentially* `await` `task_a()` and `ta
 We still `await task1` and `await task2` at the end of `main()`. This is important because `main()` needs to wait for these background tasks to actually finish before `main()` itself can complete and allow `asyncio.run()` to shut down the Event Loop. If `main()` finished without awaiting them, the tasks might be cancelled or not complete their work.
 
 Does the distinction between just calling a coroutine and creating an `asyncio.Task` for it make sense? The key is that `create_task()` lets them run concurrently, while simply `await`ing runs them sequentially. Ready to see the difference in execution output?
+
+
+Excellent\! Seeing the difference in action really drives the concept home.
+
+Let's revisit our two code snippets and compare their approximate output.
+
+**Scenario 1: Sequential `await` (No explicit Tasks for concurrency)**
+
+```python
+import asyncio
+import time
+
+async def task_a():
+    print(f"[{time.strftime('%X')}] Task A: Starting...")
+    await asyncio.sleep(2)
+    print(f"[{time.strftime('%X')}] Task A: Finished!")
+
+async def task_b():
+    print(f"[{time.strftime('%X')}] Task B: Starting...")
+    await asyncio.sleep(1)
+    print(f"[{time.strftime('%X')}] Task B: Finished!")
+
+async def main_sequential():
+    print(f"[{time.strftime('%X')}] Main Sequential: Program starts.")
+    await task_a() # Finishes after ~2 seconds
+    await task_b() # Starts after task_a, finishes after ~1 more second
+    print(f"[{time.strftime('%X')}] Main Sequential: Program ends.")
+
+if __name__ == "__main__":
+    print("--- Running Sequential Example ---")
+    asyncio.run(main_sequential())
+```
+
+**Approximate Output (Sequential):**
+
+```
+--- Running Sequential Example ---
+[12:26:00 AM] Main Sequential: Program starts.
+[12:26:00 AM] Task A: Starting...
+[12:26:02 AM] Task A: Finished!  <-- Notice this is roughly 2 seconds later
+[12:26:02 AM] Task B: Starting...
+[12:26:03 AM] Task B: Finished!  <-- Notice this is roughly 1 second after Task A finished
+[12:26:03 AM] Main Sequential: Program ends.
+```
+
+**Total time:** Approximately 3 seconds. The tasks run one after another, as if in a queue.
+
+-----
+
+**Scenario 2: Concurrent using `asyncio.create_task()` and `await`ing tasks**
+
+```python
+import asyncio
+import time
+
+async def task_a():
+    print(f"[{time.strftime('%X')}] Task A: Starting...")
+    await asyncio.sleep(2)
+    print(f"[{time.strftime('%X')}] Task A: Finished!")
+
+async def task_b():
+    print(f"[{time.strftime('%X')}] Task B: Starting...")
+    await asyncio.sleep(1)
+    print(f"[{time.strftime('%X')}] Task B: Finished!")
+
+async def main_concurrent():
+    print(f"[{time.strftime('%X')}] Main Concurrent: Program starts.")
+
+    task1 = asyncio.create_task(task_a())
+    task2 = asyncio.create_task(task_b())
+
+    # These await calls will wait for the *completion* of the tasks,
+    # but the tasks themselves were started concurrently.
+    await task1
+    await task2
+
+    print(f"[{time.strftime('%X')}] Main Concurrent: Program ends.")
+
+if __name__ == "__main__":
+    print("\n--- Running Concurrent Example ---")
+    asyncio.run(main_concurrent())
+```
+
+**Approximate Output (Concurrent):**
+
+```
+--- Running Concurrent Example ---
+[12:26:05 AM] Main Concurrent: Program starts.
+[12:26:05 AM] Task A: Starting...   <-- Task A and B start almost immediately
+[12:26:05 AM] Task B: Starting...   <--
+[12:26:06 AM] Task B: Finished!     <-- Task B (1-second sleep) finishes first
+[12:26:07 AM] Task A: Finished!     <-- Task A (2-second sleep) finishes after Task B
+[12:26:07 AM] Main Concurrent: Program ends.
+```
+
+**Total time:** Approximately 2 seconds. This is because when `Task A` `await`s its 2-second sleep, the Event Loop immediately switches to `Task B` and allows it to run. `Task B` completes its 1-second sleep, and then the Event Loop switches back to `Task A` to let it finish its remaining time. The longest-running concurrent task determines the total time.
+
+See the difference? In the concurrent example, `Task A` and `Task B` both *start* almost at the same time, and `Task B` finishes before `Task A` because it has a shorter sleep time. This is true concurrency using a single thread\!
+
+You might have also noticed that we awaited `task1` and `task2` individually. For more convenient waiting for *multiple* tasks to complete, `asyncio` provides `asyncio.gather()`. It's a powerful function that allows you to run multiple coroutines (or tasks) concurrently and wait for all of them to complete.
+
+Instead of:
+
+```python
+    await task1
+    await task2
+```
+
+You could write:
+
+```python
+    await asyncio.gather(task1, task2)
+```
+
+This is often cleaner when you have many tasks.
+
+How does seeing the approximate output differences make you feel about the power of `asyncio.create_task()` and `asyncio.gather()`? Are you seeing how it enables your "super-efficient barista" to truly juggle tasks?
+
+
+
